@@ -82,6 +82,7 @@ To create a new mod:
 
 For more detailed technical information, check the `docs/` folder:
 - [Running Locally](docs/running-locally.md)
+- [IntelliJ Debugging](docs/intellij-debugging.md)
 - [Storage API](docs/storage.md)
 - [Backend & HTTP API](docs/api.md)
 
