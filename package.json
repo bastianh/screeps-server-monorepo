@@ -1,0 +1,11 @@
+{
+  "name": "screeps-server-mods-monorepo",
+  "private": true,
+  "description": "Monorepo for Screeps private server mods",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
