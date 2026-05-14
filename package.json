@@ -14,5 +14,13 @@
   },
   "devDependencies": {
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@screeps/backend": "workspace:*",
+    "@screeps/common": "workspace:*",
+    "@screeps/driver": "workspace:*",
+    "@screeps/engine": "workspace:*",
+    "@screeps/launcher": "workspace:*",
+    "@screeps/storage": "workspace:*"
   }
 }

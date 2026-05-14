@@ -81,6 +81,7 @@ To create a new mod:
 ## Documentation
 
 For more detailed technical information, check the `docs/` folder:
+- [Running Locally](docs/running-locally.md)
 - [Storage API](docs/storage.md)
 - [Backend & HTTP API](docs/api.md)
 

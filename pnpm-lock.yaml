@@ -7,6 +7,25 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@screeps/backend':
+        specifier: workspace:*
+        version: link:packages/backend-local
+      '@screeps/common':
+        specifier: workspace:*
+        version: link:packages/common
+      '@screeps/driver':
+        specifier: workspace:*
+        version: link:packages/driver
+      '@screeps/engine':
+        specifier: workspace:*
+        version: link:packages/engine
+      '@screeps/launcher':
+        specifier: workspace:*
+        version: link:packages/launcher
+      '@screeps/storage':
+        specifier: workspace:*
+        version: link:packages/storage
     devDependencies:
       typescript:
         specifier: ^5.0.0

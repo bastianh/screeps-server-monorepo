@@ -2,3 +2,11 @@ node_modules
 dist
 .pnpm-debug.log
 .DS_Store
+
+# Local Server State & Config
+.screepsrc
+db.json
+mods.json
+logs/
+assets/
+steam_appid.txt
