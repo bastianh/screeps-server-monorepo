@@ -3,7 +3,14 @@
   "private": true,
   "description": "Monorepo for Screeps private server mods",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "subtree:update:engine": "git subtree pull --prefix packages/engine https://github.com/screeps/engine.git master --squash",
+    "subtree:update:common": "git subtree pull --prefix packages/common https://github.com/screeps/common.git master --squash",
+    "subtree:update:backend": "git subtree pull --prefix packages/backend-local https://github.com/screeps/backend-local.git master --squash",
+    "subtree:update:driver": "git subtree pull --prefix packages/driver https://github.com/screeps/driver.git master --squash",
+    "subtree:update:launcher": "git subtree pull --prefix packages/launcher https://github.com/screeps/launcher.git master --squash",
+    "subtree:update:storage": "git subtree pull --prefix packages/storage https://github.com/screeps/storage.git master --squash",
+    "subtree:update:all": "npm run subtree:update:engine && npm run subtree:update:common && npm run subtree:update:backend && npm run subtree:update:driver && npm run subtree:update:launcher && npm run subtree:update:storage"
   },
   "devDependencies": {
     "typescript": "^5.0.0"
