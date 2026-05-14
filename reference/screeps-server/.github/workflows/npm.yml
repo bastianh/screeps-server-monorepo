@@ -1,0 +1,39 @@
+name: Build npm package
+on:
+  push:
+    branches:
+      - '**'
+jobs:
+  build:
+    if: contains(github.event.head_commit.message, '🔖')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: ⤵️ Checkout
+        uses: actions/checkout@v4
+      - name: 🔨 Setup node (github registry)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+      - name: 🔨 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: 👷 Install
+        run: npm ci
+        env:
+          npm_config_python: python3.10
+          CXXFLAGS: "-include stdexcept -include limits -include utility"
+      - name: 📦️ Publish package (npmjs)
+        if: github.ref_name == 'master'
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPMJS_TOKEN }}
+      - name: 📦️ Publish tagged package (npmjs)
+        if: github.ref_name != 'master'
+        run: npm publish --tag ${{ github.ref_name }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPMJS_TOKEN }}
