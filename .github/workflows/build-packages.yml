@@ -1,0 +1,43 @@
+name: Build platform packages
+on:
+  push:
+    tags:
+      - 'build-package'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: ⤵️ Checkout
+        uses: actions/checkout@v6
+      - name: Get version from package.json
+        id: get_version
+        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_ENV
+      - name: 🔨 Setup node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.14.0'
+      - name: 👷 Install
+        run: npm ci
+      - name: 🔨 Install additional dependencies
+        shell: bash
+        run: npm install $(node -p "Object.entries(require('./node_modules/@screeps/launcher/package.json').devDependencies).map(([k,v])=>k+'@'+v).join(' ')")
+      - name: 🧹 Cleanup binaries
+        shell: bash
+        run: |
+          rm -rf node_modules/electron
+          rm node_modules/isolated-vm/build/Release/isolated_vm.node
+          rm node_modules/@screeps/driver/native/build/Release/native.node
+          rm node_modules/@screeps/driver/build/runtime.snapshot.bin
+      - name: 🚚 Move node_modules to server/package/node_modules
+        shell: bash
+        run: |
+          mkdir -p server/package
+          mv node_modules server/package/node_modules
+      - name: 📦️ Uplad package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ env.VERSION }}
+          path: "*/package/node_modules/**"
+          include-hidden-files: true
