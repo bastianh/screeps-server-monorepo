@@ -1,0 +1,60 @@
+name: Build npm package
+on:
+  push:
+    branches:
+      - '**'
+jobs:
+  build:
+    if: contains(github.event.head_commit.message, '🔖')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: ⤵️ Checkout
+        uses: actions/checkout@v4
+      - name: 🔨 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      # Setup .npmrc file to publish to GitHub Packages
+      - name: 🔨 Setup node (github registry)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          registry-url: 'https://npm.pkg.github.com'
+          # Defaults to the user or organization that owns the workflow file
+          scope: '@screeps'
+      - name: 👷 Install
+        run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          npm_config_python: python3.10
+          CXXFLAGS: "-include stdexcept -include limits"
+      - name: 📦️ Publish package (github registry)
+        if: github.ref_name == 'master'
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 📦️ Publish tagged package (github registry)
+        if: github.ref_name != 'master'
+        run: npm publish --tag ${{ github.ref_name }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🔨 Setup node (npmjs)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+          scope: '@screeps'
+      - name: 📦️ Publish package (npmjs)
+        if: github.ref_name == 'master'
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPMJS_TOKEN }}
+      - name: 📦️ Publish tagged package (npmjs)
+        if: github.ref_name != 'master'
+        run: npm publish --tag ${{ github.ref_name }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPMJS_TOKEN }}
+  
