@@ -6,6 +6,8 @@
   "author": "Artem Chivchalov <contact@screeps.com>",
   "license": "ISC",
   "dependencies": {
+    "@screeps/common": "workspace:*",
+    "@screeps/storage": "workspace:*",
     "generic-pool": "^3.4.1",
     "he": "1.2.0",
     "isolated-vm": "github:laverdet/isolated-vm#cb93efcc1881c826ee98ad34e66955c08713acb2",

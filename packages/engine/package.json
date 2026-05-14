@@ -12,6 +12,8 @@
     "prepublish": "gulp"
   },
   "dependencies": {
+    "@screeps/common": "workspace:*",
+    "@screeps/driver": "workspace:*",
     "@screeps/pathfinding": "^0.4.17",
     "bulk-require": "1.0.1",
     "cross-env": "^5.2.0",
