@@ -1,0 +1,48 @@
+{
+  "name": "@screeps/engine",
+  "version": "4.3.1",
+  "bin": {
+    "screeps-engine-main": "dist/main.js",
+    "screeps-engine-runner": "dist/runner.js",
+    "screeps-engine-processor": "dist/processor.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "cross-env DRIVER_MODULE=@screeps/driver jasmine",
+    "prepublish": "gulp"
+  },
+  "dependencies": {
+    "@screeps/pathfinding": "^0.4.17",
+    "bulk-require": "1.0.1",
+    "cross-env": "^5.2.0",
+    "lodash": "3.10.1",
+    "q": "^1.0.1"
+  },
+  "devDependencies": {
+    "babel-plugin-transform-es2015-destructuring": "^6.23.0",
+    "babel-plugin-transform-strict-mode": "^6.24.1",
+    "babel-preset-es2015": "^6.24.1",
+    "cross-env": "^5.2.0",
+    "gulp": "5.0.1",
+    "gulp-babel": "^6.1.2",
+    "gulp-plumber": "^1.1.0",
+    "gulp-sourcemaps": "^2.6.0",
+    "gulp-watch": "^4.3.11",
+    "jasmine": "3.99.0"
+  },
+  "license": "ISC",
+  "author": "Artem Chivchalov <contact@screeps.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/screeps/engine.git"
+  },
+  "babel": {
+    "plugins": [
+      "transform-es2015-destructuring",
+      "transform-strict-mode"
+    ]
+  },
+  "browser": {
+    "@screeps/core": "@screeps/simcore"
+  }
+}

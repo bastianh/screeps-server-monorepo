@@ -1,0 +1,7 @@
+# Created by .gitignore support plugin (hsz.mobi)
+dist
+dist_linux
+node_modules
+.idea
+build/config.gypi
+src/local-config.js
