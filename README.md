@@ -40,6 +40,18 @@ This repository is a specialized development environment for creating and managi
 - `docs/`: Technical documentation for server APIs (Storage, API, etc.).
 - `reference/`: Full standalone server reference build.
 
+## Original Repositories
+
+The core components integrated into this monorepo are maintained by the official Screeps team:
+
+- **Main Server**: [screeps/screeps](https://github.com/screeps/screeps)
+- **Game Engine**: [screeps/engine](https://github.com/screeps/engine)
+- **Common Logic**: [screeps/common](https://github.com/screeps/common)
+- **Driver**: [screeps/driver](https://github.com/screeps/driver)
+- **Storage**: [screeps/storage](https://github.com/screeps/storage)
+- **Backend**: [screeps/backend-local](https://github.com/screeps/backend-local)
+- **Launcher**: [screeps/launcher](https://github.com/screeps/launcher)
+
 ## Key NPM Scripts
 
 Available in the root `package.json`:
