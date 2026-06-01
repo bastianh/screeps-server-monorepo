@@ -3,8 +3,15 @@
   "version": "0.1.0",
   "description": "Prometheus /metrics endpoint for Screeps private server",
   "main": "index.js",
+  "files": ["index.js"],
+  "keywords": ["screeps", "screepsmod", "prometheus", "metrics", "monitoring"],
   "license": "ISC",
-  "dependencies": {
-    "@screeps/common": "workspace:*"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_USERNAME/screeps-server-monorepo.git",
+    "directory": "mods/screepsmod-prometheus"
+  },
+  "peerDependencies": {
+    "@screeps/common": ">=2.0.0"
   }
 }
