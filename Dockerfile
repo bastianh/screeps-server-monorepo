@@ -9,10 +9,13 @@ RUN npm install -g pnpm
 
 WORKDIR /app
 
-# Install dependencies first (better layer caching)
+# Install dependencies first (better layer caching).
+# packages/driver/native/ must be present alongside its package.json because
+# pnpm install triggers node-gyp rebuild -C native as an install script.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/common/package.json      packages/common/
 COPY packages/driver/package.json      packages/driver/
+COPY packages/driver/native/           packages/driver/native/
 COPY packages/engine/package.json      packages/engine/
 COPY packages/storage/package.json     packages/storage/
 COPY packages/backend-local/package.json packages/backend-local/
