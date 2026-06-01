@@ -197,6 +197,13 @@ async function make (scope, userId) {
         $set.lastUsedCpu = runResult.usedTime;
         $set.lastUsedDirtyTime = runResult.usedDirtyTime;
 
+        // screepsmod-prometheus: capture IVM heap stats for /metrics endpoint
+        if (!vm.isolate.isDisposed) {
+            const heap = vm.isolate.getHeapStatisticsSync();
+            $set.lastHeapUsed  = heap.used_heap_size;
+            $set.lastHeapTotal = heap.total_heap_size;
+        }
+
         if (runResult.activeSegments) {
             $set.activeSegments = runResult.activeSegments;
         }
