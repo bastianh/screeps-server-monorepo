@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 make g++ git \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g pnpm
+RUN npm install -g pnpm@10.33.2
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ COPY packages/launcher/package.json    packages/launcher/
 COPY mods/example-mod/package.json     mods/example-mod/
 COPY mods/screepsmod-prometheus/package.json mods/screepsmod-prometheus/
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install
 
 # Copy sources and build engine
 COPY packages/ packages/
