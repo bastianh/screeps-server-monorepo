@@ -37,6 +37,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/common
 
+  mods/screepsmod-prometheus:
+    dependencies:
+      '@screeps/common':
+        specifier: workspace:*
+        version: link:../../packages/common
+
   packages/backend-local:
     dependencies:
       '@screeps/common':
