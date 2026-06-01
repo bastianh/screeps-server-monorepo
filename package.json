@@ -13,7 +13,10 @@
     "subtree:update:all": "npm run subtree:update:engine && npm run subtree:update:common && npm run subtree:update:backend && npm run subtree:update:driver && npm run subtree:update:launcher && npm run subtree:update:storage"
   },
   "devDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["isolated-vm"]
   },
   "dependencies": {
     "@screeps/backend": "workspace:*",

@@ -28,7 +28,7 @@ importers:
         version: link:packages/storage
     devDependencies:
       typescript:
-        specifier: ^5.0.0
+        specifier: ^5.9.3
         version: 5.9.3
 
   mods/example-mod:
@@ -40,8 +40,8 @@ importers:
   mods/screepsmod-prometheus:
     dependencies:
       '@screeps/common':
-        specifier: workspace:*
-        version: link:../../packages/common
+        specifier: '>=2.0.0'
+        version: 2.16.1
 
   packages/backend-local:
     dependencies:
@@ -384,6 +384,9 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
+
+  '@screeps/common@2.16.1':
+    resolution: {integrity: sha512-pat4dy+2HOe0u+loax3G222aFqKQA4NBnkD8ihFpD/ljYKmZbwjVL4WpOzyZGvuybGD0jvLVkUZAEGkP1L5qVw==}
 
   '@screeps/pathfinding@0.4.17':
     resolution: {integrity: sha512-W8z4jkKe+PHtWWNZ3Q4Jy/BtK90hqe/THt1bXlFNlgCZrZxMh5ckAsKfa4v1jSHX1QE35BkQYH0yxYt5Q+o6rw==}
@@ -4308,6 +4311,11 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
+
+  '@screeps/common@2.16.1':
+    dependencies:
+      lodash: 3.10.1
+      q: 1.5.1
 
   '@screeps/pathfinding@0.4.17':
     dependencies:
