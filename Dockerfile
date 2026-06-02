@@ -49,6 +49,14 @@ COPY packages/ packages/
 COPY mods/     mods/
 RUN cd packages/engine && pnpm exec gulp
 
+# Build the driver's IVM runtime bundle (build/runtime.bundle.js). The official
+# `screeps` package does this in its postinstall; without it the runner cannot
+# create user isolates and no player code executes. The .npmignore was patched
+# to stop excluding build/ so it is included in the packed tarball. The snapshot
+# is dropped so the runtime falls back to compiling the bundle (avoids any
+# cross-build V8 snapshot mismatch); it is only a cold-start optimization.
+RUN cd packages/driver && pnpm exec webpack && rm -f build/runtime.snapshot.bin
+
 # Pack core packages and local mods to stable tarball names.
 RUN mkdir -p /opt/screeps-core \
  && pnpm --filter @screeps/common   pack --out /opt/screeps-core/screeps-common.tgz \

@@ -7,6 +7,7 @@
   "license": "ISC",
   "dependencies": {
     "@screeps/common": "workspace:*",
+    "@screeps/pathfinding": "^0.4.17",
     "@screeps/storage": "workspace:*",
     "generic-pool": "^3.4.1",
     "he": "1.2.0",
