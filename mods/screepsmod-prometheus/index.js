@@ -35,9 +35,16 @@ module.exports = function(config) {
         } catch (_) {}
     };
 
-    storage._connect()
-        .then(() => { reportProcessMemory(); setInterval(reportProcessMemory, 10000); })
-        .catch(() => {});
+    // Start periodic process-memory reporting. We deliberately do NOT call
+    // storage._connect() here. With screepsmod-mongo, _connect() flips
+    // storage._connected=true synchronously and reverts storage._connect before
+    // it has finished (asynchronously) wrapping the db collections. Triggering
+    // it during mod load makes the engine driver's own connect() short-circuit
+    // and read an empty db (db.rooms === undefined), crashing every engine
+    // process. Each process establishes its own storage connection during
+    // startup; reportProcessMemory is guarded and simply no-ops until then.
+    reportProcessMemory();
+    setInterval(reportProcessMemory, 10000);
 
     // ── Engine main: tick timing and queue counts ─────────────────────────────
     if (config.engine) {
