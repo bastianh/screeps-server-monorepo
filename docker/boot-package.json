@@ -1,0 +1,8 @@
+{
+  "name": "screeps-boot",
+  "private": true,
+  "description": "Boot-time config generator dependencies for the container image",
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
