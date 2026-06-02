@@ -101,6 +101,9 @@ function main() {
   // ---- .npmrc (hoisted flat tree + writable store/cache on the PVC) ---------
   const npmrc = [
     'node-linker=hoisted',
+    // copy (not hardlink) from the store: the PVC's CSI filesystem does not
+    // support pnpm's rename/hardlink-based package import (ERR_PNPM_EEXIST).
+    'package-import-method=copy',
     `store-dir=${path.join(DATA_DIR, '.pnpm-store')}`,
     `cache-dir=${path.join(DATA_DIR, '.pnpm-cache')}`,
     'prefer-offline=false',

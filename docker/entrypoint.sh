@@ -18,9 +18,12 @@ FINGERPRINT_FILE="$DATA_DIR/.boot-fingerprint"
 # pnpm/node-gyp need a writable HOME; the PVC is the only writable mount when
 # running as a non-root user.
 export HOME="$DATA_DIR"
-# Use the node-gyp headers baked into the image so the driver's native build
-# does not need network access at boot.
-export npm_config_devdir="${NODE_GYP_DEVDIR:-/opt/node-gyp-cache}"
+# node-gyp needs a writable devdir to manage Node headers (the baked
+# /opt/node-gyp-cache is root-owned and read-only for the non-root runtime
+# user, which makes node-gyp fail with EACCES). Use the PVC; headers are
+# fetched once and cached there across reinstalls.
+export npm_config_devdir="$DATA_DIR/.node-gyp"
+mkdir -p "$DATA_DIR/.node-gyp"
 
 mkdir -p "$DATA_DIR/assets" "$DATA_DIR/logs"
 
@@ -41,6 +44,12 @@ fi
 if [ "$NEEDS_INSTALL" -eq 1 ]; then
   echo "[entrypoint] installing dependencies (fingerprint changed or first boot)"
   cd "$DATA_DIR"
+  # Always start from a clean node_modules/store. A partial pnpm install on the
+  # PVC leaves temp dirs (npm_tmp_*) and a dangling .bin/screeps-launcher, which
+  # defeats a conditional check and causes ERR_PNPM_EEXIST on retry. Reinstalls
+  # only happen on a fingerprint change, so a full clean reinstall is fine.
+  echo "[entrypoint] purging node_modules/store for a clean install"
+  rm -rf "$DATA_DIR/node_modules" "$DATA_DIR/.pnpm-store" "$DATA_DIR/.pnpm-cache" "$DATA_DIR/.modules.yaml" "$DATA_DIR/pnpm-lock.yaml"
   # pnpm is installed globally in the image; no corepack shim needed (and the
   # shim dir is not writable for the non-root runtime user).
   # --prod: no devDependencies. --no-frozen-lockfile: there is no committed
