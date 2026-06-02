@@ -107,6 +107,12 @@ These files diverge intentionally from upstream. When a `subtree:update` produce
 | File | What was changed | Why |
 |---|---|---|
 | `packages/driver/lib/runtime/make.js` | Writes `lastHeapUsed` / `lastHeapTotal` into the user `$set` after each IVM execution | `screepsmod-prometheus` reads these fields for `/metrics` |
+| `packages/driver/.npmignore` | Removed `build` from the ignore list | So the webpack-built `build/runtime.bundle.js` is included when the driver is `pnpm pack`ed for the container image |
+| `packages/driver/package.json` | Added `@screeps/pathfinding` to `dependencies` | The bundled runtime (`lib/runtime/mapgrid.js`) requires it; it must resolve from the driver's own `node_modules` during the webpack build |
+
+**The driver's IVM runtime bundle must be webpack-built** (`cd packages/driver && pnpm exec webpack`) before packing/running — the official `screeps` package does this in its postinstall. Without `build/runtime.bundle.js` the runner cannot create user isolates and **no player code executes**. The container `Dockerfile` runs this after the engine gulp build.
+
+**Container image must be built for the cluster arch** (`docker buildx build --platform linux/amd64`); the zeta nodes are amd64 while the typical build host (Apple Silicon) is arm64 — a mismatched image fails with `exec format error`.
 
 ## Conventions
 
