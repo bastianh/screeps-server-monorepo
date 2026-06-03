@@ -218,7 +218,8 @@ async function make (scope, userId) {
             $set.cpuAvailable = newCpuAvailable;
         }
 
-        db.users.update({_id: userData.user._id}, {$set});
+        // screepsmod-prometheus: atomic cumulative CPU counter (float ms) per user.
+        db.users.update({_id: userData.user._id}, {$set, $inc: {metricsCpuMsTotal: runResult.usedTime}});
 
         if (runResult.activeForeignSegment !== undefined) {
             if (runResult.activeForeignSegment === null) {

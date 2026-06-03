@@ -106,7 +106,7 @@ These files diverge intentionally from upstream. When a `subtree:update` produce
 
 | File | What was changed | Why |
 |---|---|---|
-| `packages/driver/lib/runtime/make.js` | Writes `lastHeapUsed` / `lastHeapTotal` into the user `$set` after each IVM execution | `screepsmod-prometheus` reads these fields for `/metrics` |
+| `packages/driver/lib/runtime/make.js` | Writes `lastHeapUsed` / `lastHeapTotal` into the user `$set`, and `$inc`s `metricsCpuMsTotal` (cumulative CPU ms), after each IVM execution | `screepsmod-prometheus` reads these fields for `/metrics` |
 | `packages/driver/.npmignore` | Removed `build` from the ignore list | So the webpack-built `build/runtime.bundle.js` is included when the driver is `pnpm pack`ed for the container image |
 | `packages/driver/package.json` | Added `@screeps/pathfinding` to `dependencies` | The bundled runtime (`lib/runtime/mapgrid.js`) requires it; it must resolve from the driver's own `node_modules` during the webpack build |
 
