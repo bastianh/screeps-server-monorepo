@@ -1,19 +1,29 @@
 'use strict';
 const os = require('os');
+const crypto = require('crypto');
 const common = require('@screeps/common');
 const storage = common.storage;
 
+// ── Config (env vars, with defaults) ─────────────────────────────────────────
+const ENV = process.env;
+const bool = (v, d) => (v == null || v === '') ? d : /^(1|true|yes|on)$/i.test(v);
+const GLOBAL_TOKEN = ENV.PROM_GLOBAL_TOKEN || '';            // bearer for /metrics; empty = no auth
+const GLOBAL_INCLUDE_PLAYERS = bool(ENV.PROM_GLOBAL_INCLUDE_PLAYERS, true); // per-user cpu/heap on global
+const PLAYER_ENABLED = bool(ENV.PROM_PLAYER_METRICS, true);  // /metrics/player endpoint
+const CUSTOM_ENABLED = bool(ENV.PROM_CUSTOM_METRICS, true);  // Game.metrics API
+const CUSTOM_MAX_KEYS = parseInt(ENV.PROM_CUSTOM_MAX_KEYS, 10) || 32;
+const CUSTOM_TTL = parseInt(ENV.PROM_CUSTOM_TTL, 10) || 90;  // seconds; refreshed while the player keeps writing
+const CT = 'text/plain; version=0.0.4; charset=utf-8';
+
 // Tick wall-clock histogram bucket boundaries (le, milliseconds). +Inf implicit.
 const TICK_LE = [50, 100, 150, 200, 250, 400, 800, 1600, 3200];
-
-// Redis keys (accumulated by engine_main, the single writer of these keys).
-const HIST_KEY = 'metrics/tick_time_hist';        // hash: <le>|inf|sum|count
-const ROOMS_KEY = 'metrics/rooms_processed_total'; // cumulative counter
-const USERS_KEY = 'metrics/users_processed_total'; // cumulative counter
+const HIST_KEY = 'metrics/tick_time_hist';
+const ROOMS_KEY = 'metrics/rooms_processed_total';
+const USERS_KEY = 'metrics/users_processed_total';
 const GAMETIME_KEY = 'metrics/tick_game_time';
+const CUSTOM_KEY = id => `metrics/custom:${id}`;
+const KEY_RE = /^[a-zA-Z0-9_]{1,64}$/;
 
-// Determine which server role this process is running as.
-// Engine main and runner share config.engine, so we distinguish them by argv.
 function detectRole(config) {
     if (config.backend) return 'backend';
     const script = (process.argv[1] || '').replace(/\\/g, '/');
@@ -22,42 +32,38 @@ function detectRole(config) {
     return 'engine';
 }
 
+// Escape a Prometheus label value.
+function esc(v) {
+    return String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ');
+}
+
 module.exports = function(config) {
     const role = detectRole(config);
     const pid  = process.pid;
-    const hostname = process.env.HOSTNAME || os.hostname();
+    const hostname = ENV.HOSTNAME || os.hostname();
     const processKey = `metrics/process:${role}:${hostname}:${pid}`;
 
     // ── Process memory reporter — runs in every process ───────────────────────
-    // Keys are written with a 30s TTL; expired entries are filtered out at read time.
     const reportProcessMemory = async () => {
         try {
             const m = process.memoryUsage();
             await Promise.all([
                 storage.env.setex(processKey, 30, JSON.stringify({
                     service: role, instance: `${hostname}:${pid}`, pid,
-                    rss: m.rss, heapTotal: m.heapTotal,
-                    heapUsed: m.heapUsed, external: m.external,
+                    rss: m.rss, heapTotal: m.heapTotal, heapUsed: m.heapUsed, external: m.external,
                 })),
                 storage.env.sadd('metrics/active_processes', processKey),
             ]);
         } catch (_) {}
     };
-
-    // We deliberately do NOT call storage._connect() here (see git history): with
-    // screepsmod-mongo that flips _connected before the async collection wrapping
-    // completes and crash-loops the engine. Each process connects on its own; the
-    // guarded calls below simply no-op until then.
+    // Do NOT call storage._connect() here (see git history) — each process connects
+    // on its own; these guarded calls no-op until then.
     reportProcessMemory();
     setInterval(reportProcessMemory, 10000);
 
-    // ── Engine main: accumulate tick-rate-independent counters/histogram ───────
-    // The game ticks faster than Prometheus scrapes, so per-tick gauges alias.
-    // engine_main is the only writer of these keys, so plain read-modify-write is
-    // race-free, and the values persist across restarts (true cumulative counters).
+    // ── Engine main: tick-rate-independent counters/histogram ─────────────────
     if (config.engine) {
         let tickStart = 0;
-
         config.engine.on('mainLoopStage', async (stage, data) => {
             try {
                 if (stage === 'start') {
@@ -81,7 +87,6 @@ module.exports = function(config) {
         const cur = parseFloat(await storage.env.get(key)) || 0;
         await storage.env.set(key, String(cur + delta));
     }
-
     async function recordTick(elapsed) {
         const h = (await storage.env.hgetall(HIST_KEY)) || {};
         let field = 'inf';
@@ -93,118 +98,218 @@ module.exports = function(config) {
         await storage.env.hmset(HIST_KEY, update);
     }
 
-    // ── Backend: /metrics endpoint (served at /api/metrics) ────────────────────
-    if (config.backend) {
-        config.backend.router.get('/metrics', async (req, res) => {
+    // ── Custom player metrics via Game.metrics (runner only) ──────────────────
+    // Injected into the player sandbox; values flow to a host callback (Reference),
+    // are buffered per-user in this process, and flushed to Redis. Persists until
+    // overwritten/cleared, with a refreshed TTL so inactive players self-expire.
+    if (CUSTOM_ENABLED && config.engine && role === 'engine_runner') {
+        let ivm;
+        const buf = Object.create(null);   // userId -> { key: number }
+        const dirty = new Set();
+
+        const handlePush = (userID, key, value) => {
             try {
-                res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-                res.send(await buildMetricsOutput());
-            } catch (err) {
-                console.error('[screepsmod-prometheus] Error generating metrics:', err);
-                res.status(500).send('# Error generating metrics\n');
-            }
+                if (key === '' && value === null) { buf[userID] = Object.create(null); dirty.add(userID); return; }
+                if (!KEY_RE.test(key)) return;
+                if (typeof value !== 'number' || !isFinite(value)) return;
+                let m = buf[userID];
+                if (!m) m = buf[userID] = Object.create(null);
+                if (!(key in m) && Object.keys(m).length >= CUSTOM_MAX_KEYS) return;
+                m[key] = value;
+                dirty.add(userID);
+            } catch (_) {}
+        };
+
+        const refs = Object.create(null); // userId -> ivm.Reference (cached to avoid per-tick churn)
+        config.engine.on('playerSandbox', (sandbox, userID) => {
+            try {
+                ivm = ivm || require('isolated-vm');
+                const id = '' + userID;
+                let ref = refs[id];
+                if (!ref) ref = refs[id] = new ivm.Reference((k, v) => handlePush(id, k, v));
+                // Game is rebuilt every tick, so (re)inject Game.metrics each tick. The host
+                // Reference lives on the persistent context global; capture it into a closure
+                // and remove the global binding so player code only sees Game.metrics.
+                sandbox.getContext().global.setIgnored('__screepsMetricsPush', ref);
+                sandbox.run(`(function(){
+                    var __r = __screepsMetricsPush;
+                    delete global.__screepsMetricsPush;
+                    Game.metrics = Object.create(null, {
+                        set:   { value: function(k, v){ __r.applySync(undefined, [''+k, v===null?null:+v]); }, enumerable: true },
+                        clear: { value: function(){ __r.applySync(undefined, ['', null]); }, enumerable: true }
+                    });
+                })();`);
+            } catch (_) {}
         });
+
+        setInterval(async () => {
+            const ids = [...dirty]; dirty.clear();
+            for (const id of ids) {
+                try {
+                    const m = buf[id] || {};
+                    if (Object.keys(m).length === 0) await storage.env.del(CUSTOM_KEY(id));
+                    else await storage.env.setex(CUSTOM_KEY(id), CUSTOM_TTL, JSON.stringify(m));
+                } catch (_) {}
+            }
+        }, 2000);
     }
 
-    // ── Metrics text builder ──────────────────────────────────────────────────
-    async function buildMetricsOutput() {
-        const [hist, roomsTotal, usersTotal, gameTime] = await Promise.all([
-            storage.env.hgetall(HIST_KEY),
-            storage.env.get(ROOMS_KEY),
-            storage.env.get(USERS_KEY),
-            storage.env.get(GAMETIME_KEY),
-        ]);
-        const h = hist || {};
-
-        // Per-user metrics come from the users DB collection rather than runner hooks,
-        // because the runner executes users concurrently which makes event-based
-        // per-user correlation unreliable. The driver writes lastUsedCpu / heap and a
-        // cumulative metricsCpuMsTotal to the collection after each execution.
-        const users = await storage.db.users.find({});
-
-        const processKeys = (await storage.env.smembers('metrics/active_processes')) || [];
-        const processDataRaw = await Promise.all(processKeys.map(k => storage.env.get(k)));
-        const processData = processDataRaw
-            .map(s => { try { return s ? JSON.parse(s) : null; } catch (_) { return null; } })
-            .filter(Boolean);
-
-        let out = '';
-
-        function write(name, type, help, rows) {
-            out += `# HELP ${name} ${help}\n# TYPE ${name} ${type}\n`;
-            for (const { labels, value } of rows) {
-                if (value == null) continue;
-                out += labels ? `${name}{${labels}} ${value}\n` : `${name} ${value}\n`;
+    // ── Backend: metrics endpoints ────────────────────────────────────────────
+    if (config.backend) {
+        // Global endpoint (VM scrapes this). Optional shared-secret bearer auth.
+        config.backend.router.get('/metrics', async (req, res) => {
+            if (GLOBAL_TOKEN) {
+                const auth = (req.headers.authorization || '');
+                const tok = /^Bearer (.+)$/i.exec(auth);
+                const provided = (tok && tok[1]) || (req.query && req.query.token);
+                if (provided !== GLOBAL_TOKEN) {
+                    return res.status(401).send('# unauthorized\n');
+                }
             }
-            out += '\n';
-        }
+            try {
+                res.set('Content-Type', CT);
+                res.send(await buildGlobal());
+            } catch (err) {
+                console.error('[screepsmod-prometheus] global metrics error:', err);
+                res.status(500).send('# error\n');
+            }
+        });
 
-        // ── Tick wall-clock duration histogram ────────────────────────────────
-        // Captures every tick regardless of scrape interval. Use
-        // histogram_quantile(0.95, rate(screeps_tick_time_ms_bucket[5m])) etc.
+        // Per-player endpoint: Basic Auth with the player's own screeps credentials.
+        if (PLAYER_ENABLED) {
+            config.backend.router.get('/metrics/player', async (req, res) => {
+                const unauth = (msg) => res.set('WWW-Authenticate', 'Basic realm="screeps metrics"').status(401).send(`# ${msg}\n`);
+                const cred = parseBasic(req);
+                if (!cred) return unauth('authentication required');
+                let userId;
+                try { userId = await authUser(config, cred); } catch (_) { userId = null; }
+                if (!userId) return unauth('invalid credentials');
+                try {
+                    res.set('Content-Type', CT);
+                    res.send(await buildPlayer(userId));
+                } catch (err) {
+                    console.error('[screepsmod-prometheus] player metrics error:', err);
+                    res.status(500).send('# error\n');
+                }
+            });
+        }
+    }
+
+    // ── Auth (per-player) ─────────────────────────────────────────────────────
+    const authCache = new Map(); // sha256(user:pass) -> { userId, exp }
+    function parseBasic(req) {
+        const h = req.headers && (req.headers.authorization || '');
+        if (!/^Basic /i.test(h)) return null;
+        let raw;
+        try { raw = Buffer.from(h.slice(6).trim(), 'base64').toString('utf8'); } catch (_) { return null; }
+        const i = raw.indexOf(':');
+        if (i < 0) return null;
+        return { raw, username: raw.slice(0, i), password: raw.slice(i + 1) };
+    }
+    async function authUser(config, cred) {
+        const ckey = crypto.createHash('sha256').update(cred.raw).digest('hex');
+        const now = Date.now();
+        const hit = authCache.get(ckey);
+        if (hit && hit.exp > now) return hit.userId;
+        if (!config.auth || typeof config.auth.authUser !== 'function') return null; // screepsmod-auth required
+        const user = await config.auth.authUser(cred.username, cred.password).catch(() => false);
+        if (!user) return null;
+        authCache.set(ckey, { userId: '' + user._id, exp: now + 60000 });
+        return '' + user._id;
+    }
+
+    // ── Renderers ─────────────────────────────────────────────────────────────
+    function writer() {
+        let out = '';
+        return {
+            metric(name, type, help, rows) {
+                out += `# HELP ${name} ${help}\n# TYPE ${name} ${type}\n`;
+                for (const { labels, value } of rows) {
+                    if (value == null) continue;
+                    out += labels ? `${name}{${labels}} ${value}\n` : `${name} ${value}\n`;
+                }
+                out += '\n';
+            },
+            raw(s) { out += s; },
+            toString() { return out; },
+        };
+    }
+
+    function emitPerUser(w, users) {
+        const ran = users.filter(u => u.metricsCpuMsTotal != null);
+        if (ran.length) w.metric('screeps_user_cpu_ms_total', 'counter',
+            'Cumulative CPU milliseconds used by player script (driver usedTime, float)',
+            ran.map(u => ({ labels: `username="${esc(u.username)}"`, value: u.metricsCpuMsTotal })));
+        const cpu = users.filter(u => u.cpu);
+        w.metric('screeps_user_cpu_bucket', 'gauge', 'Current CPU bucket balance for player',
+            cpu.filter(u => u.cpuAvailable != null).map(u => ({ labels: `username="${esc(u.username)}"`, value: u.cpuAvailable })));
+        w.metric('screeps_user_cpu_limit', 'gauge', 'Configured CPU limit per tick for player in milliseconds',
+            cpu.map(u => ({ labels: `username="${esc(u.username)}"`, value: u.cpu })));
+        const heap = users.filter(u => u.lastHeapUsed != null);
+        if (heap.length) {
+            w.metric('screeps_user_heap_used_bytes', 'gauge', 'VM isolate heap used bytes per player',
+                heap.map(u => ({ labels: `username="${esc(u.username)}"`, value: u.lastHeapUsed })));
+            w.metric('screeps_user_heap_total_bytes', 'gauge', 'VM isolate heap total allocated bytes per player',
+                heap.map(u => ({ labels: `username="${esc(u.username)}"`, value: u.lastHeapTotal })));
+        }
+    }
+
+    function emitHistogram(w, h) {
+        h = h || {};
         const count = parseFloat(h.count) || 0;
-        out += '# HELP screeps_tick_time_ms Game tick wall-clock duration distribution in milliseconds\n';
-        out += '# TYPE screeps_tick_time_ms histogram\n';
+        w.raw('# HELP screeps_tick_time_ms Game tick wall-clock duration distribution in milliseconds\n');
+        w.raw('# TYPE screeps_tick_time_ms histogram\n');
         let cum = 0;
-        for (const le of TICK_LE) {
-            cum += parseFloat(h[String(le)]) || 0;
-            out += `screeps_tick_time_ms_bucket{le="${le}"} ${cum}\n`;
+        for (const le of TICK_LE) { cum += parseFloat(h[String(le)]) || 0; w.raw(`screeps_tick_time_ms_bucket{le="${le}"} ${cum}\n`); }
+        w.raw(`screeps_tick_time_ms_bucket{le="+Inf"} ${count}\n`);
+        w.raw(`screeps_tick_time_ms_sum ${parseFloat(h.sum) || 0}\n`);
+        w.raw(`screeps_tick_time_ms_count ${count}\n\n`);
+    }
+
+    async function emitProcessMemory(w) {
+        const processKeys = (await storage.env.smembers('metrics/active_processes')) || [];
+        const raw = await Promise.all(processKeys.map(k => storage.env.get(k)));
+        const data = raw.map(s => { try { return s ? JSON.parse(s) : null; } catch (_) { return null; } }).filter(Boolean);
+        if (!data.length) return;
+        const rows = data.flatMap(p => [
+            { labels: `service="${esc(p.service)}",instance="${esc(p.instance)}",type="rss"`,       value: p.rss },
+            { labels: `service="${esc(p.service)}",instance="${esc(p.instance)}",type="heapTotal"`, value: p.heapTotal },
+            { labels: `service="${esc(p.service)}",instance="${esc(p.instance)}",type="heapUsed"`,  value: p.heapUsed },
+            { labels: `service="${esc(p.service)}",instance="${esc(p.instance)}",type="external"`,  value: p.external },
+        ]);
+        w.metric('screeps_process_memory_bytes', 'gauge', 'Node.js process memory in bytes', rows);
+    }
+
+    async function buildGlobal() {
+        const w = writer();
+        const [hist, roomsTotal, usersTotal, gameTime] = await Promise.all([
+            storage.env.hgetall(HIST_KEY), storage.env.get(ROOMS_KEY),
+            storage.env.get(USERS_KEY), storage.env.get(GAMETIME_KEY),
+        ]);
+        emitHistogram(w, hist);
+        if (gameTime != null) w.metric('screeps_tick_game_time', 'counter', 'Current game time (total tick count)', [{ value: gameTime }]);
+        w.metric('screeps_rooms_processed_total', 'counter', 'Cumulative rooms queued for processing across all ticks', [{ value: parseFloat(roomsTotal) || 0 }]);
+        w.metric('screeps_users_processed_total', 'counter', 'Cumulative user script runs queued across all ticks', [{ value: parseFloat(usersTotal) || 0 }]);
+        if (GLOBAL_INCLUDE_PLAYERS) emitPerUser(w, await storage.db.users.find({}));
+        await emitProcessMemory(w);
+        return w.toString();
+    }
+
+    async function buildPlayer(userId) {
+        const w = writer();
+        const user = await storage.db.users.findOne({ _id: userId });
+        if (user) {
+            emitPerUser(w, [user]);
+            // Custom metrics (only ever exposed on the authenticated per-player endpoint)
+            let custom = null;
+            try { const s = await storage.env.get(CUSTOM_KEY(userId)); custom = s ? JSON.parse(s) : null; } catch (_) {}
+            if (custom && typeof custom === 'object') {
+                const rows = Object.entries(custom)
+                    .filter(([k, v]) => KEY_RE.test(k) && typeof v === 'number' && isFinite(v))
+                    .map(([k, v]) => ({ labels: `username="${esc(user.username)}",key="${esc(k)}"`, value: v }));
+                w.metric('screeps_custom', 'gauge', 'Custom player-defined metric (Game.metrics.set)', rows);
+            }
         }
-        out += `screeps_tick_time_ms_bucket{le="+Inf"} ${count}\n`;
-        out += `screeps_tick_time_ms_sum ${parseFloat(h.sum) || 0}\n`;
-        out += `screeps_tick_time_ms_count ${count}\n\n`;
-
-        // ── Tick-rate-independent counters ────────────────────────────────────
-        if (gameTime != null)
-            write('screeps_tick_game_time', 'counter', 'Current game time (total tick count)',
-                [{ value: gameTime }]);
-        write('screeps_rooms_processed_total', 'counter',
-            'Cumulative rooms queued for processing across all ticks',
-            [{ value: parseFloat(roomsTotal) || 0 }]);
-        write('screeps_users_processed_total', 'counter',
-            'Cumulative user script runs queued across all ticks',
-            [{ value: parseFloat(usersTotal) || 0 }]);
-
-        // ── Per-user CPU ──────────────────────────────────────────────────────
-        // Cumulative counter (float ms), captured per execution via driver $inc.
-        // Total CPU/sec = sum(rate(screeps_user_cpu_ms_total[1m])).
-        const ranUsers = users.filter(u => u.metricsCpuMsTotal != null);
-        if (ranUsers.length > 0) {
-            write('screeps_user_cpu_ms_total', 'counter',
-                'Cumulative CPU milliseconds used by player script (driver usedTime, float)',
-                ranUsers.map(u => ({ labels: `username="${u.username}"`, value: u.metricsCpuMsTotal })));
-        }
-
-        // Slow-moving per-user gauges (fine to sample).
-        const cpuUsers = users.filter(u => u.cpu);
-        write('screeps_user_cpu_bucket', 'gauge', 'Current CPU bucket balance for player',
-            cpuUsers.filter(u => u.cpuAvailable != null)
-                .map(u => ({ labels: `username="${u.username}"`, value: u.cpuAvailable })));
-        write('screeps_user_cpu_limit', 'gauge', 'Configured CPU limit per tick for player in milliseconds',
-            cpuUsers.map(u => ({ labels: `username="${u.username}"`, value: u.cpu })));
-
-        // ── Per-user IVM heap (requires patched packages/driver/lib/runtime/make.js) ──
-        const withHeap = users.filter(u => u.lastHeapUsed != null);
-        if (withHeap.length > 0) {
-            write('screeps_user_heap_used_bytes', 'gauge',
-                'VM isolate heap used bytes per player (requires patched driver)',
-                withHeap.map(u => ({ labels: `username="${u.username}"`, value: u.lastHeapUsed })));
-            write('screeps_user_heap_total_bytes', 'gauge',
-                'VM isolate heap total allocated bytes per player (requires patched driver)',
-                withHeap.map(u => ({ labels: `username="${u.username}"`, value: u.lastHeapTotal })));
-        }
-
-        // ── Process memory (all server processes report here every 10s, 30s TTL) ──
-        if (processData.length > 0) {
-            const rows = processData.flatMap(p => [
-                { labels: `service="${p.service}",instance="${p.instance}",type="rss"`,       value: p.rss },
-                { labels: `service="${p.service}",instance="${p.instance}",type="heapTotal"`, value: p.heapTotal },
-                { labels: `service="${p.service}",instance="${p.instance}",type="heapUsed"`,  value: p.heapUsed },
-                { labels: `service="${p.service}",instance="${p.instance}",type="external"`,  value: p.external },
-            ]);
-            write('screeps_process_memory_bytes', 'gauge', 'Node.js process memory in bytes', rows);
-        }
-
-        return out;
+        return w.toString();
     }
 };
