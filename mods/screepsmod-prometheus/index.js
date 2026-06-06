@@ -51,7 +51,7 @@ module.exports = function(config) {
             const m = process.memoryUsage();
             await Promise.all([
                 storage.env.setex(processKey, 30, JSON.stringify({
-                    service: role, instance: `${hostname}:${pid}`, pid,
+                    role, proc: `${hostname}:${pid}`, pid,
                     rss: m.rss, heapTotal: m.heapTotal, heapUsed: m.heapUsed, external: m.external,
                 })),
                 storage.env.sadd('metrics/active_processes', processKey),
@@ -301,10 +301,10 @@ module.exports = function(config) {
         const data = raw.map(s => { try { return s ? JSON.parse(s) : null; } catch (_) { return null; } }).filter(Boolean);
         if (!data.length) return;
         const rows = data.flatMap(p => [
-            { labels: `service="${esc(p.service)}",instance="${esc(p.instance)}",type="rss"`,       value: p.rss },
-            { labels: `service="${esc(p.service)}",instance="${esc(p.instance)}",type="heapTotal"`, value: p.heapTotal },
-            { labels: `service="${esc(p.service)}",instance="${esc(p.instance)}",type="heapUsed"`,  value: p.heapUsed },
-            { labels: `service="${esc(p.service)}",instance="${esc(p.instance)}",type="external"`,  value: p.external },
+            { labels: `role="${esc(p.role)}",proc="${esc(p.proc)}",type="rss"`,       value: p.rss },
+            { labels: `role="${esc(p.role)}",proc="${esc(p.proc)}",type="heapTotal"`, value: p.heapTotal },
+            { labels: `role="${esc(p.role)}",proc="${esc(p.proc)}",type="heapUsed"`,  value: p.heapUsed },
+            { labels: `role="${esc(p.role)}",proc="${esc(p.proc)}",type="external"`,  value: p.external },
         ]);
         w.metric('screeps_process_memory_bytes', 'gauge', 'Node.js process memory in bytes', rows);
     }

@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "description": "Prometheus /metrics endpoint for Screeps private server",
   "main": "index.js",
-  "files": ["index.js"],
+  "files": ["index.js", "README.md", "grafana-dashboard.json"],
   "keywords": ["screeps", "screepsmod", "prometheus", "metrics", "monitoring"],
   "license": "ISC",
   "repository": {
     "type": "git",
-    "url": "https://github.com/YOUR_USERNAME/screeps-server-monorepo.git",
+    "url": "https://github.com/bastianh/screeps-server-monorepo.git",
     "directory": "mods/screepsmod-prometheus"
   },
   "peerDependencies": {

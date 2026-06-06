@@ -608,7 +608,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "screeps_process_memory_bytes{job=~\"$job\",type=\"rss\"}",
-          "legendFormat": "{{service}} {{instance}}",
+          "legendFormat": "{{role}} {{proc}}",
           "refId": "A"
         }
       ]
@@ -649,13 +649,13 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "screeps_process_memory_bytes{job=~\"$job\",type=\"heapUsed\"}",
-          "legendFormat": "{{service}} {{instance}} heapUsed",
+          "legendFormat": "{{role}} {{proc}} heapUsed",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "screeps_process_memory_bytes{job=~\"$job\",type=\"heapTotal\"}",
-          "legendFormat": "{{service}} {{instance}} heapTotal",
+          "legendFormat": "{{role}} {{proc}} heapTotal",
           "refId": "B"
         }
       ]
