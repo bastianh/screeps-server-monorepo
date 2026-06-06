@@ -24,6 +24,12 @@
     "@screeps/driver": "workspace:*",
     "@screeps/engine": "workspace:*",
     "@screeps/launcher": "workspace:*",
-    "@screeps/storage": "workspace:*"
+    "@screeps/storage": "workspace:*",
+    "screepsmod-admin-utils": "*",
+    "screepsmod-auth": "*",
+    "screepsmod-client-new": "*",
+    "screepsmod-history": "*",
+    "screepsmod-map-tool": "*",
+    "screepsmod-mongo": "*"
   }
 }

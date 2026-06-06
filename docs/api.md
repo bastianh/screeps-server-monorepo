@@ -107,7 +107,7 @@ module.exports = function(config) {
 
 #### Example: Adding a Passport Strategy
 
-Since the backend already uses Passport, you can register new strategies in `expressPreConfig`:
+Since the backend already uses Passport, you can register new strategies in `expressPreConfig`. This is useful if you want to support alternative authentication methods like API Keys or external OAuth providers.
 
 ```javascript
 const passport = require('passport');
@@ -116,14 +116,98 @@ const CustomStrategy = require('passport-custom').Strategy;
 module.exports = function(config) {
     if (config.backend) {
         config.backend.on('expressPreConfig', (app) => {
-            passport.use('my-strategy', new CustomStrategy(
+            passport.use('my-custom-auth', new CustomStrategy(
                 function(req, callback) {
                     // Your custom logic to identify the user
-                    // ...
-                    callback(null, user);
+                    const apiKey = req.headers['x-api-key'];
+                    if (apiKey === 'secret') {
+                         common.storage.db.users.findOne({ username: 'admin' })
+                            .then(user => callback(null, user))
+                            .catch(err => callback(err));
+                    } else {
+                        callback(null, false);
+                    }
                 }
             ));
         });
     }
 };
 ```
+
+## Fine-grained Permissions (Scopes)
+
+The standard Screeps authentication only identifies the user (`request.user`). To implement specific permissions (e.g., read-only tokens or restricted endpoints), you can extend the token data.
+
+### 1. Generating Scoped Tokens
+
+The default `authlib.genToken` only stores the user ID. You can create a custom token generator that stores a JSON object instead.
+
+```javascript
+const crypto = require('crypto');
+const storage = require('@screeps/common').storage;
+
+async function genScopedToken(userId, scopes) {
+    const token = crypto.randomBytes(16).toString('hex');
+    const data = JSON.stringify({ userId, scopes });
+    // Store in storage.env with expiration (e.g., 1 hour)
+    await storage.env.setex(`auth_${token}`, 3600, data);
+    return token;
+}
+```
+
+### 2. Validating Scoped Tokens
+
+You need a custom Passport strategy to retrieve and parse the scoped data.
+
+```javascript
+const passport = require('passport');
+const TokenStrategy = require('passport-token').Strategy;
+
+config.backend.on('expressPreConfig', (app) => {
+    passport.use('scoped-token', new TokenStrategy(async (email, token, done) => {
+        try {
+            const dataRaw = await storage.env.get(`auth_${token}`);
+            if (!dataRaw) return done(null, false);
+
+            const data = JSON.parse(dataRaw);
+            const user = await storage.db.users.findOne({ _id: data.userId });
+            
+            if (user) {
+                // Attach scopes to the user object for the request lifecycle
+                user.scopes = data.scopes;
+                return done(null, user);
+            }
+            done(null, false);
+        } catch (e) {
+            done(e);
+        }
+    }));
+});
+```
+
+### 3. Permission Middleware
+
+Create a middleware that checks if the current `request.user` has the required scope.
+
+```javascript
+function requireScope(requiredScope) {
+    return (req, res, next) => {
+        if (req.user && req.user.scopes && req.user.scopes.includes(requiredScope)) {
+            return next();
+        }
+        res.status(403).json({ error: 'forbidden', reason: `Missing scope: ${requiredScope}` });
+    };
+}
+
+// Usage in a route:
+config.backend.router.get('/my-mod/private-data', 
+    passport.authenticate('scoped-token', { session: false }),
+    requireScope('read:data'),
+    (req, res) => {
+        res.json({ data: "..." });
+    }
+);
+```
+
+Using this pattern, you can create tokens that are restricted to specific mods or actions (e.g., `room:visuals`, `market:read`) without giving full account access.
+

@@ -23,6 +23,8 @@ const USERS_KEY = 'metrics/users_processed_total';
 const GAMETIME_KEY = 'metrics/tick_game_time';
 const CUSTOM_KEY = id => `metrics/custom:${id}`;
 const KEY_RE = /^[a-zA-Z0-9_]{1,64}$/;
+const STAGE_KEY = 'metrics/tick_stage';
+const STAGE_ENABLED = bool(ENV.PROM_STAGE_METRICS, true);
 
 function detectRole(config) {
     if (config.backend) return 'backend';
@@ -64,20 +66,38 @@ module.exports = function(config) {
     // ── Engine main: tick-rate-independent counters/histogram ─────────────────
     if (config.engine) {
         let tickStart = 0;
+        let lastStage = null;
+        let lastStageTime = 0;
+        let stageAccum = null;
         config.engine.on('mainLoopStage', async (stage, data) => {
             try {
+                const now = Date.now();
                 if (stage === 'start') {
-                    tickStart = Date.now();
-                } else if (stage === 'addUsersToQueue' && Array.isArray(data)) {
-                    await addToCounter(USERS_KEY, data.length);
-                } else if (stage === 'addRoomsToQueue' && Array.isArray(data)) {
-                    await addToCounter(ROOMS_KEY, data.length);
-                } else if (stage === 'finish' && tickStart > 0) {
-                    const elapsed = Date.now() - tickStart;
-                    tickStart = 0;
-                    await recordTick(elapsed);
-                    const gameTime = await storage.env.get(storage.env.keys.GAMETIME);
-                    await storage.env.set(GAMETIME_KEY, String(gameTime || 0));
+                    tickStart = now;
+                    if (STAGE_ENABLED) { lastStage = 'start'; lastStageTime = now; stageAccum = {}; }
+                } else {
+                    if (STAGE_ENABLED && lastStage !== null) {
+                        const a = stageAccum[lastStage] || (stageAccum[lastStage] = { sum: 0, count: 0 });
+                        a.sum += now - lastStageTime;
+                        a.count += 1;
+                        lastStage = stage;
+                        lastStageTime = now;
+                    }
+                    if (stage === 'addUsersToQueue' && Array.isArray(data)) {
+                        await addToCounter(USERS_KEY, data.length);
+                    } else if (stage === 'addRoomsToQueue' && Array.isArray(data)) {
+                        await addToCounter(ROOMS_KEY, data.length);
+                    } else if (stage === 'finish' && tickStart > 0) {
+                        const elapsed = now - tickStart;
+                        tickStart = 0;
+                        await recordTick(elapsed);
+                        const gameTime = await storage.env.get(storage.env.keys.GAMETIME);
+                        await storage.env.set(GAMETIME_KEY, String(gameTime || 0));
+                        if (STAGE_ENABLED && stageAccum && Object.keys(stageAccum).length > 0) {
+                            await flushStageAccum(stageAccum);
+                            stageAccum = null;
+                        }
+                    }
                 }
             } catch (_) {}
         });
@@ -96,6 +116,15 @@ module.exports = function(config) {
         update.sum = String((parseFloat(h.sum) || 0) + elapsed);
         update.count = String((parseFloat(h.count) || 0) + 1);
         await storage.env.hmset(HIST_KEY, update);
+    }
+    async function flushStageAccum(accum) {
+        const h = (await storage.env.hgetall(STAGE_KEY)) || {};
+        const update = {};
+        for (const [st, { sum, count }] of Object.entries(accum)) {
+            update[`${st}|sum`]   = String((parseFloat(h[`${st}|sum`])   || 0) + sum);
+            update[`${st}|count`] = String((parseFloat(h[`${st}|count`]) || 0) + count);
+        }
+        if (Object.keys(update).length) await storage.env.hmset(STAGE_KEY, update);
     }
 
     // ── Custom player metrics via Game.metrics (runner only) ──────────────────
@@ -280,16 +309,40 @@ module.exports = function(config) {
         w.metric('screeps_process_memory_bytes', 'gauge', 'Node.js process memory in bytes', rows);
     }
 
+    function emitStageMetrics(w, h) {
+        const stages = {};
+        for (const [field, val] of Object.entries(h)) {
+            const sep = field.lastIndexOf('|');
+            if (sep < 0) continue;
+            const stage = field.slice(0, sep);
+            const type  = field.slice(sep + 1);
+            if (type !== 'sum' && type !== 'count') continue;
+            if (!stages[stage]) stages[stage] = {};
+            stages[stage][type] = parseFloat(val) || 0;
+        }
+        const entries = Object.entries(stages).filter(([, v]) => v.sum != null && v.count != null);
+        if (!entries.length) return;
+        w.raw('# HELP screeps_tick_stage_ms_sum Cumulative milliseconds in each main-loop stage\n');
+        w.raw('# TYPE screeps_tick_stage_ms_sum counter\n');
+        for (const [stage, { sum }] of entries) w.raw(`screeps_tick_stage_ms_sum{stage="${esc(stage)}"} ${sum}\n`);
+        w.raw('\n# HELP screeps_tick_stage_ms_count Cumulative ticks measured per main-loop stage\n');
+        w.raw('# TYPE screeps_tick_stage_ms_count counter\n');
+        for (const [stage, { count }] of entries) w.raw(`screeps_tick_stage_ms_count{stage="${esc(stage)}"} ${count}\n`);
+        w.raw('\n');
+    }
+
     async function buildGlobal() {
         const w = writer();
-        const [hist, roomsTotal, usersTotal, gameTime] = await Promise.all([
+        const [hist, roomsTotal, usersTotal, gameTime, stageHash] = await Promise.all([
             storage.env.hgetall(HIST_KEY), storage.env.get(ROOMS_KEY),
             storage.env.get(USERS_KEY), storage.env.get(GAMETIME_KEY),
+            STAGE_ENABLED ? storage.env.hgetall(STAGE_KEY) : Promise.resolve(null),
         ]);
         emitHistogram(w, hist);
         if (gameTime != null) w.metric('screeps_tick_game_time', 'counter', 'Current game time (total tick count)', [{ value: gameTime }]);
         w.metric('screeps_rooms_processed_total', 'counter', 'Cumulative rooms queued for processing across all ticks', [{ value: parseFloat(roomsTotal) || 0 }]);
         w.metric('screeps_users_processed_total', 'counter', 'Cumulative user script runs queued across all ticks', [{ value: parseFloat(usersTotal) || 0 }]);
+        if (STAGE_ENABLED && stageHash) emitStageMetrics(w, stageHash);
         if (GLOBAL_INCLUDE_PLAYERS) emitPerUser(w, await storage.db.users.find({}));
         await emitProcessMemory(w);
         return w.toString();

@@ -33,6 +33,44 @@ This repository is a specialized development environment for creating and managi
    pnpm install
    ```
 
+## Running the Local Test Server
+
+After installing dependencies, build the engine once and initialize the launcher files in the repository root:
+
+```bash
+cd packages/engine
+pnpm exec gulp
+cd ../..
+cp packages/launcher/init_dist/db.json .
+cp packages/launcher/init_dist/mods.json .
+cp packages/launcher/init_dist/.screepsrc .
+mkdir -p assets logs
+```
+
+If you run the server outside the Steam client, add your Steam Web API key to `.screepsrc`:
+
+```ini
+steam_api_key = YOUR_STEAM_API_KEY_HERE
+```
+
+Start the server in the foreground with console logs:
+
+```bash
+mise exec -- node packages/launcher/bin/screeps.js start --log_console
+```
+
+If your shell already uses Node 24, you can start it directly:
+
+```bash
+node packages/launcher/bin/screeps.js start --log_console
+```
+
+The default server port is `21025` and the CLI port is `21026`. To connect to the server CLI while it is running:
+
+```bash
+npx screeps cli
+```
+
 ## Project Structure
 
 - `mods/`: Your custom mods live here.
